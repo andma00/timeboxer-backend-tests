@@ -3,8 +3,12 @@ using Microsoft.EntityFrameworkCore;
 using Timebox.Controllers;
 using TimeboxTask = Timebox.Models.Task;
 using TimeboxUser = Timebox.Models.User;
+using Timebox.Models;
 using BCrypt.Net;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
+using Task = System.Threading.Tasks.Task;
 
 [TestFixture]
 public class TaskControllerTests
@@ -12,6 +16,7 @@ public class TaskControllerTests
     private AppDbContext _context;
     private TaskController _controller;
     private TimeboxUser _testUser;
+    private TimeboxUser _otherUser;
     [SetUp]
     public void Setup()
     {
@@ -31,6 +36,31 @@ public class TaskControllerTests
             Email = "test@testdomain.com",
             PasswordHash = BCrypt.Net.BCrypt.HashPassword("password123")
         };
+
+
+        var claims = new List<Claim>
+        {
+                                new Claim(ClaimTypes.NameIdentifier, _testUser.Id)
+        };
+
+        var identity = new ClaimsIdentity(claims, "TestAuthType");
+        var claimsPrincipal = new ClaimsPrincipal(identity);
+
+        _otherUser = new TimeboxUser
+        {
+            Username = "otheruser",
+            Email = "otheruser@testdomain.com",
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword("password456")
+        };
+
+        _controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = claimsPrincipal
+            }
+        };
+
     }
 
     [TearDown]
@@ -62,6 +92,33 @@ public class TaskControllerTests
         Assert.That(okResult.Count() == 1);
     }
 
+    public async Task TaskController_GetTasks_ReturnsOnlyUserTasks()
+    {
+        _context.Tasks.Add(new TimeboxTask
+        {
+            Description = "Test Task 1",
+            Duration = TimeSpan.FromHours(1).Minutes,
+            UserId = _testUser.Id
+        });
+
+        _context.Tasks.Add(new TimeboxTask
+        {
+            Description = "Test Task 2",
+            Duration = TimeSpan.FromHours(2).Minutes,
+            UserId = _otherUser.Id
+        });
+
+        await _context.SaveChangesAsync();
+
+        var result = await _controller.GetAllTasks();
+        var okResult = result.Value;
+
+        Assert.That(okResult != null);
+        Assert.That(okResult.Count() == 1);
+        Assert.That(okResult.First().Description == "Test Task 1");
+    }
+
+
     [Test]
     public async Task TaskController_GetTaskById_ReturnsTask()
     {
@@ -88,15 +145,31 @@ public class TaskControllerTests
         var notFound = result.Result as NotFoundResult;
         Assert.That(notFound != null);
     }
+    [Test]
+    public async Task TaskController_GetTaskById_ReturnsNotFound_WhenAccessingOtherUserTask()
+    {
+        _context.Tasks.Add(new TimeboxTask
+        {
+            Id = "1",
+            Description = "Should Not Be Found",
+            Duration = TimeSpan.FromHours(2).Minutes,
+            UserId = _otherUser.Id
+        });
+
+        await _context.SaveChangesAsync();
+
+        var result = await _controller.GetTaskById("1");
+        var notFound = result.Result as NotFoundResult;
+        Assert.That(notFound != null);
+    }
 
     [Test]
     public async Task TaskController_CreateTask_ReturnsCreatedTask()
     {
-        TimeboxTask task = new TimeboxTask
+        TaskCreateDto task = new TaskCreateDto
         {
             Description = "New Task",
-            Duration = TimeSpan.FromHours(2).Minutes,
-            UserId = _testUser.Id
+            Duration = TimeSpan.FromHours(2).Minutes
         };
 
         var result = await _controller.CreateTask(task);
@@ -122,13 +195,11 @@ public class TaskControllerTests
         _context.Tasks.Add(task);
         await _context.SaveChangesAsync();
 
-        TimeboxTask updatedTask = new TimeboxTask
+        TaskUpdateDto updatedTask = new TaskUpdateDto
         {
-            Id = "1",
             Description = "Updated Task",
             Duration = TimeSpan.FromHours(3).Minutes,
-            StartedAt = now,
-            UserId = _testUser.Id
+            StartedAt = now
         };
 
         var result = await _controller.UpdateTask("1", updatedTask);
@@ -142,41 +213,12 @@ public class TaskControllerTests
     }
 
     [Test]
-    public async Task TaskController_UpdateTask_ReturnsBadRequest()
-    {
-        TimeboxTask task = new TimeboxTask
-        {
-            Id = "1",
-            Description = "New Task",
-            Duration = TimeSpan.FromHours(2).Minutes,
-            UserId = _testUser.Id
-        };
-
-        _context.Tasks.Add(task);
-        await _context.SaveChangesAsync();
-
-        TimeboxTask updatedTask = new TimeboxTask
-        {
-            Id = "2",
-            Description = "Updated Task",
-            Duration = TimeSpan.FromHours(3).Minutes,
-            UserId = _testUser.Id
-        };
-
-        var result = await _controller.UpdateTask("1", updatedTask);
-        var badRequestResult = result as BadRequestResult;
-        Assert.That(badRequestResult != null);
-
-    }
-    [Test]
     public async Task TaskController_UpdateTask_ReturnsNotFound()
     {
-        TimeboxTask updatedTask = new TimeboxTask
+        TaskUpdateDto updatedTask = new TaskUpdateDto
         {
-            Id = "1",
             Description = "Updated Task",
-            Duration = TimeSpan.FromHours(3).Minutes,
-            UserId = _testUser.Id
+            Duration = TimeSpan.FromHours(3).Minutes
         };
 
         var result = await _controller.UpdateTask("1", updatedTask);
@@ -199,12 +241,10 @@ public class TaskControllerTests
         _context.Tasks.Add(task);
         await _context.SaveChangesAsync();
 
-        TimeboxTask updatedTask = new TimeboxTask
+        TaskUpdateDto updatedTask = new TaskUpdateDto
         {
-            Id = "1",
             Description = "Updated Task",
             Duration = TimeSpan.FromHours(3).Minutes,
-            UserId = _testUser.Id
         };
 
         _context.Tasks.Remove(task);
@@ -213,6 +253,29 @@ public class TaskControllerTests
         var result = await _controller.UpdateTask("1", updatedTask);
         var notFoundResult = result as NotFoundResult;
         Assert.That(notFoundResult != null);
+    }
+    [Test]
+    public async Task TaskController_UpdateTask_ReturnsNotFound_WhenAccessingOtherUserTask()
+    {
+        _context.Tasks.Add(new TimeboxTask
+        {
+            Id = "1",
+            Description = "Should Not Be Found",
+            Duration = TimeSpan.FromHours(2).Minutes,
+            UserId = _otherUser.Id
+        });
+
+        await _context.SaveChangesAsync();
+
+        TaskUpdateDto updatedTask = new TaskUpdateDto
+        {
+            Description = "Updated Task",
+            Duration = TimeSpan.FromHours(3).Minutes,
+        };
+
+        var result = await _controller.UpdateTask("1", updatedTask);
+        var notFound = result as NotFoundResult;
+        Assert.That(notFound != null);
     }
 
     [Test]
@@ -240,6 +303,24 @@ public class TaskControllerTests
         var result = await _controller.DeleteTask("1");
         var notFoundResult = result as NotFoundResult;
         Assert.That(notFoundResult != null);
+    }
+
+    [Test]
+    public async Task TaskController_DeleteTask_ReturnsNotFound_WhenAccessingOtherUserTask()
+    {
+        _context.Tasks.Add(new TimeboxTask
+        {
+            Id = "1",
+            Description = "Should Not Be Found",
+            Duration = TimeSpan.FromHours(2).Minutes,
+            UserId = _otherUser.Id
+        });
+
+        await _context.SaveChangesAsync();
+
+        var result = await _controller.DeleteTask("1");
+        var notFound = result as NotFoundResult;
+        Assert.That(notFound != null);
     }
 }
 
