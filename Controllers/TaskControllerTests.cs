@@ -166,10 +166,16 @@ public class TaskControllerTests
     [Test]
     public async Task TaskController_CreateTask_ReturnsCreatedTask()
     {
+        List<Goal> goals = new List<Goal>
+                {
+                    new Goal { Id = "g1", Description = "Goal 1" },
+                    new Goal { Id = "g2", Description = "Goal 2" }
+                };
         TaskCreateDto task = new TaskCreateDto
         {
             Description = "New Task",
-            Duration = TimeSpan.FromHours(2).Minutes
+            Duration = TimeSpan.FromHours(2).Minutes,
+            Goals = goals
         };
 
         var result = await _controller.CreateTask(task);
@@ -178,6 +184,9 @@ public class TaskControllerTests
         var createdTask = createdResult.Value as TimeboxTask;
         Assert.That(createdTask != null);
         Assert.That(createdTask.Description == task.Description);
+        Assert.That(createdTask.Goals.Count == 2);
+        Assert.That(createdTask.Goals.Any(g => g.Description == "Goal 1"));
+        Assert.That(createdTask.Goals.Any(g => g.Description == "Goal 2"));
     }
 
     [Test]
@@ -210,6 +219,122 @@ public class TaskControllerTests
         Assert.That(taskInDb.Duration == TimeSpan.FromHours(3).Minutes);
         Assert.That(taskInDb.StartedAt != null);
         Assert.That(taskInDb.StartedAt.Value >= now);
+    }
+
+    [Test]
+    public async Task TaskController_UpdateTask_ReturnsNoContent_WhenAddingGoals()
+    {
+        DateTime now = DateTime.UtcNow;
+        TimeboxTask task = new TimeboxTask
+        {
+            Id = "1",
+            Description = "New Task",
+            Duration = TimeSpan.FromHours(2).Minutes,
+            UserId = _testUser.Id
+        };
+
+        _context.Tasks.Add(task);
+        await _context.SaveChangesAsync();
+
+        List<Goal> goals = new List<Goal>
+    {
+        new Goal { Id = "g1", Description = "Goal 1" },
+        new Goal { Id = "g2", Description = "Goal 2" }
+    };
+
+        TaskUpdateDto updatedTask = new TaskUpdateDto
+        {
+            Description = "New Task",
+            Duration = TimeSpan.FromHours(2).Minutes,
+            Goals = goals
+        };
+
+        var result = await _controller.UpdateTask("1", updatedTask);
+        var noContentResult = result as NoContentResult;
+        Assert.That(noContentResult != null);
+        var taskInDb = await _context.Tasks.FindAsync("1");
+        Assert.That(taskInDb.Goals.Count == 2);
+        var goal1 = taskInDb.Goals.FirstOrDefault(g => g.Description == "Goal 1");
+    }
+
+    [Test]
+    public async Task TaskController_UpdateTask_ReturnsNoContent_WhenUpdatingGoals()
+    {
+        List<Goal> goals = new List<Goal>
+    {
+        new Goal { Id = "g1", Description = "Goal 1" },
+        new Goal { Id = "g2", Description = "Goal 2" }
+    };
+
+        DateTime now = DateTime.UtcNow;
+        TimeboxTask task = new TimeboxTask
+        {
+            Id = "1",
+            Description = "New Task",
+            Duration = TimeSpan.FromHours(2).Minutes,
+            UserId = _testUser.Id,
+            Goals = goals
+        };
+
+        _context.Tasks.Add(task);
+        await _context.SaveChangesAsync();
+
+        List<Goal> updatedGoals = new List<Goal>
+    {
+        new Goal { Id = "g1", Description = "Updated Goal 1" },
+                new Goal { Id = "g2", Description="Goal 2", IsCompleted = true }
+    };
+
+        TaskUpdateDto updatedTask = new TaskUpdateDto
+        {
+            Description = "New Task",
+            Duration = TimeSpan.FromHours(2).Minutes,
+            Goals = updatedGoals
+        };
+
+        var result = await _controller.UpdateTask("1", updatedTask);
+        var noContentResult = result as NoContentResult;
+        Assert.That(noContentResult != null);
+        var taskInDb = await _context.Tasks.FindAsync("1");
+        Assert.That(taskInDb.Goals.Any(g => g.Description == "Updated Goal 1"));
+        Assert.That(taskInDb.Goals.Any(g => g.IsCompleted));
+    }
+    [Test]
+    public async Task TaskController_UpdateTask_ReturnsNoContent_WhenRemovingGoal()
+    {
+        List<Goal> goals = new List<Goal>
+    {
+        new Goal { Id = "g1", Description = "Goal 1" },
+        new Goal { Id = "g2", Description = "Goal 2" }
+    };
+
+        DateTime now = DateTime.UtcNow;
+        TimeboxTask task = new TimeboxTask
+        {
+            Id = "1",
+            Description = "New Task",
+            Duration = TimeSpan.FromHours(2).Minutes,
+            UserId = _testUser.Id,
+            Goals = goals
+        };
+
+        _context.Tasks.Add(task);
+        await _context.SaveChangesAsync();
+
+        List<Goal> updatedGoals = new List<Goal>();
+
+        TaskUpdateDto updatedTask = new TaskUpdateDto
+        {
+            Description = "New Task",
+            Duration = TimeSpan.FromHours(2).Minutes,
+            Goals = updatedGoals
+        };
+
+        var result = await _controller.UpdateTask("1", updatedTask);
+        var noContentResult = result as NoContentResult;
+        Assert.That(noContentResult != null);
+        var taskInDb = await _context.Tasks.FindAsync("1");
+        Assert.That(taskInDb.Goals.Count == 0);
     }
 
     [Test]
